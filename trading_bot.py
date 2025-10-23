@@ -1,299 +1,266 @@
-import logging
-import sys
-import time
 import os
-from binance import Client
+import logging
+from datetime import datetime
+from typing import Dict, Optional
+from dotenv import load_dotenv
+import google.generativeai as genai
+from binance.client import Client
 from binance.enums import *
-from binance.exceptions import BinanceAPIException, BinanceRequestException
-from config import API_KEY, API_SECRET  # Import from config
 
-# Create logs directory if it doesn't exist
-os.makedirs('logs', exist_ok=True)
+# Constants
+ORDER_TYPES = ["MARKET", "LIMIT", "STOP_LIMIT"]
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/trading_bot.log', mode='a'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+def setup_logging():
+    # Main bot logger
+    bot_logger = logging.getLogger('bot')
+    bot_logger.setLevel(logging.INFO)
+    bot_handler = logging.FileHandler('logs/bot.log')
+    bot_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    bot_logger.addHandler(bot_handler)
+    
+    # Raw requests logger
+    req_logger = logging.getLogger('requests')
+    req_logger.setLevel(logging.DEBUG)
+    req_handler = logging.FileHandler('logs/raw_requests.log')
+    req_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+    req_logger.addHandler(req_handler)
+    
+    return bot_logger, req_logger
 
-logger = logging.getLogger(__name__)
-
-class BasicBot:
-    def __init__(self, api_key, api_secret, testnet=True):
-        """Initialize the trading bot with Binance API credentials for Futures Testnet."""
-        self.client = Client(api_key, api_secret, testnet=testnet)
-        self.testnet = testnet
-        logger.info("Bot initialized with testnet=%s", testnet)
-
-    def validate_symbol(self, symbol):
-        """Validate if the futures trading pair exists."""
+class GeminiAnalyzer:
+    def __init__(self, api_key: str):
+        """Initialize Gemini model with API key."""
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel("gemini-2.5-flash")
+        self.logger = logging.getLogger('bot')
+    
+    def analyze_trend(self, symbol: str) -> str:
+        """Analyze market trend using Gemini model."""
         try:
-            info = self.client.futures_exchange_info()
-            symbols = [s['symbol'] for s in info['symbols']]
-            if symbol.upper() in symbols:
-                logger.info("Symbol %s is valid", symbol)
-                return True
-            logger.error("Invalid symbol: %s", symbol)
-            return False
-        except BinanceAPIException as e:
-            logger.error("Error validating symbol %s: %s", symbol, e)
-            return False
+            prompt = f"""
+            Analyze {symbol} cryptocurrency trend and suggest whether to BUY, SELL, or HOLD.
+            Consider current market conditions and give a brief explanation.
+            Format response as: <DECISION>: <EXPLANATION>
+            """
+            response = self.model.generate_content(prompt)
+            self.logger.info(f"Gemini Analysis for {symbol}: {response.text}")
+            return response.text
+        except Exception as e:
+            self.logger.error(f"Gemini analysis error: {str(e)}")
+            return "ERROR: Unable to get market analysis"
 
-    def place_market_order(self, symbol, side, quantity):
-        """Place a market order on Futures."""
-        try:
-            # Log request
-            logger.info("Placing market order: symbol=%s, side=%s, quantity=%s", symbol, side, quantity)
-            order = self.client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type=ORDER_TYPE_MARKET,
-                quantity=quantity
-            )
-            logger.info("Market order response: %s", order)
-            return order
-        except BinanceAPIException as e:
-            logger.error("Error placing market order: %s", e)
-            raise
-
-    def place_limit_order(self, symbol, side, quantity, price):
-        """Place a limit order on Futures."""
-        try:
-            # Log request
-            logger.info("Placing limit order: symbol=%s, side=%s, quantity=%s, price=%s", symbol, side, quantity, price)
-            order = self.client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type=ORDER_TYPE_LIMIT,
-                timeInForce=TIME_IN_FORCE_GTC,
-                quantity=quantity,
-                price=price
-            )
-            logger.info("Limit order response: %s", order)
-            return order
-        except BinanceAPIException as e:
-            logger.error("Error placing limit order: %s", e)
-            raise
-
-    def place_stop_limit_order(self, symbol, side, quantity, stop_price, limit_price):
-        """Place a stop-limit order on Futures (Bonus feature)."""
-        try:
-            # Log request
-            logger.info("Placing stop-limit order: symbol=%s, side=%s, quantity=%s, stop_price=%s, limit_price=%s",
-                         symbol, side, quantity, stop_price, limit_price)
-            order = self.client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type=ORDER_TYPE_STOP_LOSS_LIMIT,
-                timeInForce=TIME_IN_FORCE_GTC,
-                quantity=quantity,
-                price=limit_price,
-                stopPrice=stop_price
-            )
-            logger.info("Stop-limit order response: %s", order)
-            return order
-        except BinanceAPIException as e:
-            logger.error("Error placing stop-limit order: %s", e)
-            raise
-
-    def place_oco_order(self, symbol, side, quantity, price, stop_price, stop_limit_price):
-        """Place an OCO (One-Cancels-Other) order on Futures (Bonus feature).
+class BinanceTrader:
+    def __init__(self, api_key: str, api_secret: str):
+        """Initialize Binance trader with API credentials."""
+        # Strip quotes if present in the API credentials
+        api_key = api_key.strip('"').strip("'")
+        api_secret = api_secret.strip('"').strip("'")
         
-        OCO orders consist of:
-        - A limit order at `price`
-        - A stop-loss-limit order at `stop_price` with limit at `stop_limit_price`
-        Only one can execute; when one fills, the other is cancelled.
-        """
+        # Initialize Binance client with testnet=True for testing
+        self.client = Client(api_key, api_secret, testnet=True)
+        self.logger = logging.getLogger('bot')
+        self.req_logger = logging.getLogger('requests')
+    
+    def place_order(
+        self, 
+        symbol: str, 
+        side: str, 
+        order_type: str, 
+        quantity: float,
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None
+    ) -> Dict:
+        """Place an order on Binance Futures."""
         try:
-            # Log request
-            logger.info(
-                "Placing OCO order: symbol=%s, side=%s, quantity=%s, price=%s, stop_price=%s, stop_limit_price=%s",
-                symbol, side, quantity, price, stop_price, stop_limit_price
-            )
+            # Prepare order parameters
+            params = {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity
+            }
             
-            order = self.client.futures_create_order(
-                symbol=symbol,
-                side=side,
-                type=ORDER_TYPE_TAKE_PROFIT_LIMIT,
-                timeInForce=TIME_IN_FORCE_GTC,
-                quantity=quantity,
-                price=price,
-                stopPrice=stop_price
-            )
-            logger.info("OCO order response: %s", order)
-            return order
-        except BinanceAPIException as e:
-            logger.error("Error placing OCO order: %s", e)
-            raise
-
-    def get_order_status(self, symbol, order_id):
-        """Check the status of a futures order."""
+            if order_type == "MARKET":
+                params["type"] = Client.ORDER_TYPE_MARKET
+            elif order_type == "LIMIT":
+                params["type"] = Client.ORDER_TYPE_LIMIT
+                params["price"] = price
+                params["timeInForce"] = Client.TIME_IN_FORCE_GTC
+            elif order_type == "STOP_LIMIT":
+                params["type"] = Client.ORDER_TYPE_STOP_LOSS_LIMIT
+                params["price"] = price
+                params["stopPrice"] = stop_price
+                params["timeInForce"] = Client.TIME_IN_FORCE_GTC
+            
+            # Log order parameters
+            self.req_logger.debug(f"Placing order with params: {params}")
+            
+            # Place futures order
+            response = self.client.futures_create_order(**params)
+            
+            self.logger.info(f"Order placed successfully: {response}")
+            return response
+                
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.error(f"Error placing order: {error_msg}")
+            return {"error": error_msg}
+    
+    def get_account_balance(self) -> Dict:
+        """Get account balance information."""
         try:
-            # Log request
-            logger.info("Retrieving order status: symbol=%s, order_id=%s", symbol, order_id)
-            status = self.client.futures_get_order(symbol=symbol, orderId=order_id)
-            logger.info("Order status response: %s", status)
-            return status
-        except BinanceAPIException as e:
-            logger.error("Error retrieving order status: %s", e)
-            raise
+            balance = self.client.futures_account_balance()
+            self.logger.info("Account balance retrieved successfully")
+            return balance
+        
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.error(f"Error getting balance: {error_msg}")
+            return {"error": error_msg}
 
-def print_order_details(order):
-    """Print formatted order details."""
-    print("\n" + "="*50)
-    print("ORDER DETAILS")
-    print("="*50)
-    print(f"Order ID: {order['orderId']}")
-    print(f"Symbol: {order['symbol']}")
-    print(f"Side: {order['side']}")
-    print(f"Type: {order['type']}")
-    print(f"Original Quantity: {order['origQty']}")
-    print(f"Executed Quantity: {order.get('executedQty', 'N/A')}")
-    print(f"Price: {order.get('price', 'N/A')}")
-    print(f"Stop Price: {order.get('stopPrice', 'N/A')}")
-    print(f"Status: {order['status']}")
-    print(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(order['time'] / 1000))}")
-    print("="*50 + "\n")
+def validate_symbol(symbol: str) -> bool:
+    """Validate if symbol is a proper trading pair."""
+    # Common quote currencies for Binance Futures
+    quote_currencies = ['USDT', 'BUSD', 'USDC']
+    
+    # Symbol must end with a quote currency
+    valid = any(symbol.endswith(quote) for quote in quote_currencies)
+    
+    # Symbol cannot BE just the quote currency
+    valid = valid and symbol not in quote_currencies
+    
+    return valid
+
+def get_user_input() -> Dict:
+    """Get trading parameters from user."""
+    inputs = {}
+    
+    # Get symbol with validation
+    while True:
+        symbol = input("Enter symbol (e.g., BTCUSDT): ").upper().strip()
+        
+        if validate_symbol(symbol):
+            inputs["symbol"] = symbol
+            break
+        else:
+            print("❌ Invalid symbol!")
+            print("   Symbol must be a trading pair like BTCUSDT, ETHUSDT, BNBUSDT")
+            print("   (Cannot use just 'USDT', 'BTC', etc.)")
+            print("   Examples: BTCUSDT, ETHUSDT, DOGEUSDT, LINKUSDT")
+    
+    # Get side
+    while True:
+        side = input("Enter side (BUY/SELL): ").upper().strip()
+        if side in ["BUY", "SELL"]:
+            inputs["side"] = side
+            break
+        print("Invalid side. Please enter BUY or SELL.")
+    
+    # Get order type
+    while True:
+        order_type = input("Enter order type (MARKET/LIMIT/STOP_LIMIT): ").upper().strip()
+        if order_type in ORDER_TYPES:
+            inputs["order_type"] = order_type
+            break
+        print(f"Invalid order type. Please enter one of: {', '.join(ORDER_TYPES)}")
+    
+    # Get quantity
+    while True:
+        try:
+            quantity_input = input("Enter quantity: ").strip()
+            inputs["quantity"] = float(quantity_input)
+            if inputs["quantity"] <= 0:
+                print("❌ Quantity must be greater than 0.")
+                continue
+            break
+        except ValueError:
+            print("❌ Invalid quantity. Please enter a number.")
+    
+    # Get price for LIMIT and STOP_LIMIT orders
+    if inputs["order_type"] in ["LIMIT", "STOP_LIMIT"]:
+        while True:
+            try:
+                inputs["price"] = float(input("Enter limit price: "))
+                break
+            except ValueError:
+                print("Invalid price. Please enter a number.")
+    
+    # Get stop price for STOP_LIMIT orders
+    if inputs["order_type"] == "STOP_LIMIT":
+        while True:
+            try:
+                inputs["stop_price"] = float(input("Enter stop price: "))
+                break
+            except ValueError:
+                print("Invalid stop price. Please enter a number.")
+    
+    return inputs
 
 def main():
-    """Enhanced CLI menu."""
-    print("Welcome to Binance Futures Testnet Trading Bot!")
+    # Load environment variables
+    load_dotenv()
     
-    if not API_KEY or not API_SECRET:
-        print("API credentials not found in .env. Copy .env.example to .env and add your keys.")
-        sys.exit(1)
+    # Setup logging
+    bot_logger, _ = setup_logging()
+    
+    # Initialize components
+    gemini = GeminiAnalyzer(os.getenv("GEMINI_API_KEY"))
     
     try:
-        bot = BasicBot(API_KEY, API_SECRET, testnet=True)
+        # Initialize Binance trader
+        trader = BinanceTrader(
+            os.getenv("BINANCE_API_KEY"),
+            os.getenv("BINANCE_API_SECRET")
+        )
+        
+        # Show account balance before trading
+        balance = trader.get_account_balance()
+        if "error" not in balance:
+            print("\nCurrent Account Balance:")
+            for asset in balance:
+                if float(asset['balance']) > 0:
+                    print(f"{asset['asset']}: {asset['balance']}")
+        
+        # Get user inputs
+        inputs = get_user_input()
+        
+        # Get Gemini analysis
+        analysis = gemini.analyze_trend(inputs["symbol"])
+        print(f"\nGemini Analysis:\n{analysis}")
+        
+        # Ask for confirmation
+        confirm = input("\nProceed with trade? (y/n): ").lower()
+        if confirm != 'y':
+            print("Trade cancelled.")
+            return
+        
+        # Place order
+        order_result = trader.place_order(
+            symbol=inputs["symbol"],
+            side=inputs["side"],
+            order_type=inputs["order_type"],
+            quantity=inputs["quantity"],
+            price=inputs.get("price"),
+            stop_price=inputs.get("stop_price")
+        )
+        
+        # Print result
+        if "error" in order_result:
+            print(f"❌ Order failed: {order_result['error']}")
+        else:
+            print(f"✅ Order executed successfully. Order ID: {order_result.get('orderId')}")
+            
+            # Show updated balance
+            updated_balance = trader.get_account_balance()
+            if "error" not in updated_balance:
+                print("\nUpdated Account Balance:")
+                for asset in updated_balance:
+                    if float(asset['balance']) > 0:
+                        print(f"{asset['asset']}: {asset['balance']}")
+            
     except Exception as e:
-        print(f"Failed to initialize bot: {e}")
-        logger.critical("Initialization failed: %s", e)
-        sys.exit(1)
-    
-    while True:
-        print("\n" + "="*50)
-        print("TRADING BOT MENU")
-        print("="*50)
-        print("1. Place Market Order")
-        print("2. Place Limit Order")
-        print("3. Place Stop-Limit Order")
-        print("4. Place OCO Order (One-Cancels-Other)")
-        print("5. Check Order Status")
-        print("6. Exit")
-        print("="*50)
-        
-        choice = input("Enter choice (1-6): ").strip()
-        
-        if choice == "6":
-            print("Exiting bot. Goodbye!")
-            logger.info("Bot terminated by user")
-            break
-        
-        if choice not in ["1", "2", "3", "4", "5"]:
-            print("Invalid choice. Please try again.")
-            continue
-
-        if choice != "5":  # If not checking order status
-            symbol = input("Enter trading pair (e.g., BTCUSDT): ").strip().upper()
-            if not bot.validate_symbol(symbol):
-                print("Invalid trading pair. Please check and try again.")
-                continue
-
-        if choice in ["1", "2", "3", "4"]:
-            side = input("Enter side (BUY/SELL): ").strip().upper()
-            if side not in ["BUY", "SELL"]:
-                print("Invalid side. Must be BUY or SELL.")
-                continue
-            
-            quantity_str = input("Enter quantity (e.g., 0.001): ").strip()
-            try:
-                quantity = float(quantity_str)
-                if quantity <= 0:
-                    raise ValueError("Quantity must be positive")
-            except ValueError as e:
-                print(f"Invalid quantity: {e}")
-                continue
-
-        try:
-            if choice == "1":
-                order = bot.place_market_order(symbol, side, quantity)
-                print_order_details(order)
-            
-            elif choice == "2":
-                price_str = input("Enter limit price (e.g., 50000.00): ").strip()
-                try:
-                    price = float(price_str)
-                    if price <= 0:
-                        raise ValueError("Price must be positive")
-                except ValueError as e:
-                    print(f"Invalid price: {e}")
-                    continue
-                order = bot.place_limit_order(symbol, side, quantity, price)
-                print_order_details(order)
-            
-            elif choice == "3":
-                stop_price_str = input("Enter stop price (e.g., 46000.00): ").strip()
-                limit_price_str = input("Enter limit price (e.g., 45000.00): ").strip()
-                try:
-                    stop_price = float(stop_price_str)
-                    limit_price = float(limit_price_str)
-                    if stop_price <= 0 or limit_price <= 0:
-                        raise ValueError("Prices must be positive")
-                except ValueError as e:
-                    print(f"Invalid price: {e}")
-                    continue
-                order = bot.place_stop_limit_order(symbol, side, quantity, stop_price, limit_price)
-                print_order_details(order)
-            
-            elif choice == "4":
-                price_str = input("Enter limit price (e.g., 50000.00): ").strip()
-                stop_price_str = input("Enter stop price (e.g., 46000.00): ").strip()
-                stop_limit_price_str = input("Enter stop limit price (e.g., 45000.00): ").strip()
-                try:
-                    price = float(price_str)
-                    stop_price = float(stop_price_str)
-                    stop_limit_price = float(stop_limit_price_str)
-                    if price <= 0 or stop_price <= 0 or stop_limit_price <= 0:
-                        raise ValueError("Prices must be positive")
-                except ValueError as e:
-                    print(f"Invalid price: {e}")
-                    continue
-                order = bot.place_oco_order(symbol, side, quantity, price, stop_price, stop_limit_price)
-                print_order_details(order)
-            
-            elif choice == "5":
-                order_id_str = input("Enter order ID: ").strip()
-                try:
-                    order_id = int(order_id_str)
-                except ValueError:
-                    print("Invalid order ID. Must be an integer.")
-                    continue
-                status = bot.get_order_status(symbol, order_id)
-                print_order_details(status)
-        
-        except BinanceAPIException as e:
-            error_msg = f"Binance API Error: {e.message if hasattr(e, 'message') else str(e)}"
-            print(error_msg)
-            logger.error(error_msg)
-        except ValueError as e:
-            print(f"Input Error: {e}")
-        except Exception as e:
-            error_msg = f"Unexpected Error: {e}"
-            print(error_msg)
-            logger.error(error_msg)
+        bot_logger.error(f"Main execution error: {str(e)}")
+        print(f"❌ An error occurred: {str(e)}")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nBot interrupted by user.")
-        logger.info("Bot interrupted by user")
-        sys.exit(0)
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        logger.critical("Fatal error: %s", e)
-        sys.exit(1)
+    main()

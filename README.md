@@ -43,19 +43,26 @@ Pravin_binance_bot/
 
 ## 🚀 Setup Instructions
 
-### 1. Prerequisites
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/pravinkannan18/pravin-binance-bot.git
+cd pravin-binance-bot
+```
+
+### 2. Prerequisites
 
 - Python 3.10 or higher
 - Binance Futures account (Testnet or Production)
 - API Keys (with Futures trading permissions)
 
-### 2. Install Dependencies
+### 3. Install Dependencies
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-### 3. Configure API Credentials
+### 4. Configure API Credentials
 
 Set environment variables for your API keys:
 
@@ -72,7 +79,7 @@ $env:BINANCE_API_KEY = "your_production_api_key"
 $env:BINANCE_SECRET_KEY = "your_production_secret_key"
 ```
 
-### 4. Get API Keys
+### 5. Get API Keys
 
 **Testnet:**
 - Visit: https://testnet.binancefuture.com/
@@ -261,6 +268,7 @@ Always test with Binance Futures Testnet before using real funds:
 
 ## 📚 Resources
 
+- **GitHub Repository**: https://github.com/pravinkannan18/pravin-binance-bot
 - **Binance Futures API Docs**: https://binance-docs.github.io/apidocs/futures/en/
 - **Testnet**: https://testnet.binancefuture.com/
 - **API Management**: https://www.binance.com/en/my/settings/api-management
@@ -281,6 +289,7 @@ For issues or questions:
 2. Verify API credentials and permissions
 3. Ensure sufficient balance
 4. Check Binance API status
+5. Open an issue on GitHub: https://github.com/pravinkannan18/pravin-binance-bot/issues
 
 ## 📝 License
 
@@ -288,6 +297,14 @@ This project is submitted as part of the Binance Futures Order Bot assignment.
 
 ---
 
-**Author**: Pravin  
+**Author**: Pravin Kannan  
+**GitHub**: [@pravinkannan18](https://github.com/pravinkannan18)  
+**Repository**: [pravin-binance-bot](https://github.com/pravinkannan18/pravin-binance-bot)  
 **Submission Date**: October 2025  
+**Version**: 1.0
+
+---
+
+**Author**: Pravin  
+**Submission Date**: 24/October/2025  
 **Version**: 1.0

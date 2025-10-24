@@ -45,7 +45,7 @@ Pravin_binance_bot/
 
 ### 1. Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - Binance Futures account (Testnet or Production)
 - API Keys (with Futures trading permissions)
 
@@ -92,14 +92,14 @@ $env:BINANCE_SECRET_KEY = "your_production_secret_key"
 Execute orders at current market price:
 
 ```powershell
-# Buy 0.01 BTC at market price
-python src/market_orders.py BTCUSDT BUY 0.01
+# Buy 0.001 BTC at market price
+python src/market_orders.py BTCUSDT BUY 0.001
 
-# Sell 0.5 ETH at market price
-python src/market_orders.py ETHUSDT SELL 0.5
+# Sell 0.01 ETH at market price
+python src/market_orders.py ETHUSDT SELL 0.01
 
 # Reduce-only order (close position)
-python src/market_orders.py BTCUSDT SELL 0.01 --reduce-only
+python src/market_orders.py BTCUSDT SELL 0.001 --reduce-only
 ```
 
 ### Limit Orders
@@ -107,14 +107,14 @@ python src/market_orders.py BTCUSDT SELL 0.01 --reduce-only
 Place orders at specific prices:
 
 ```powershell
-# Buy 0.01 BTC at $50,000
-python src/limit_orders.py BTCUSDT BUY 0.01 50000
+# Buy 0.001 BTC at $110,000 (below current ~$111,266)
+python src/limit_orders.py BTCUSDT BUY 0.001 110000
 
-# Sell 0.5 ETH at $2,000 with IOC time-in-force
-python src/limit_orders.py ETHUSDT SELL 0.5 2000 --time-in-force IOC
+# Sell 0.01 ETH at $4,000 (above current ~$3,956) with IOC time-in-force
+python src/limit_orders.py ETHUSDT SELL 0.01 4000 --time-in-force IOC
 
 # Post-only order (maker-only, no taker fee)
-python src/limit_orders.py BTCUSDT BUY 0.01 50000 --post-only
+python src/limit_orders.py BTCUSDT BUY 0.001 110000 --post-only
 ```
 
 **Time-in-Force Options:**
@@ -128,43 +128,47 @@ python src/limit_orders.py BTCUSDT BUY 0.01 50000 --post-only
 Trigger limit orders when stop price is reached:
 
 ```powershell
-# BUY: Trigger at 49000, place limit at 49500
-python src/advanced/stop_limit.py BTCUSDT BUY 0.01 49000 49500
+# BUY: Trigger at 112000, place limit at 112500 (breakout entry)
+python src/advanced/stop_limit.py BTCUSDT BUY 0.001 112000 112500
 
-# SELL: Stop-loss at 48000, limit at 47900
-python src/advanced/stop_limit.py BTCUSDT SELL 0.01 48000 47900 --reduce-only
+# SELL: Stop-loss at 110000, limit at 109500 (protect long position)
+python src/advanced/stop_limit.py BTCUSDT SELL 0.001 110000 109500 --reduce-only
 
 # Use MARK_PRICE instead of CONTRACT_PRICE
-python src/advanced/stop_limit.py ETHUSDT SELL 0.5 2100 2050 --working-type MARK_PRICE
+python src/advanced/stop_limit.py ETHUSDT SELL 0.01 3900 3850 --working-type MARK_PRICE
 ```
 
 ### OCO Orders (One-Cancels-the-Other)
 
-Place take-profit and stop-loss simultaneously:
+Place take-profit and stop-loss simultaneously to close positions:
 
 ```powershell
-# Close LONG position: TP at 52000 or SL at 48000
-python src/advanced/oco.py BTCUSDT LONG 0.01 52000 48000
+# Close LONG position: TP at 115000 or SL at 108000
+python src/advanced/oco.py BTCUSDT LONG 0.001 115000 108000
 
-# Close SHORT position: TP at 1900 or SL at 2100
-python src/advanced/oco.py ETHUSDT SHORT 0.5 1900 2100
+# Close SHORT position: TP at 3800 or SL at 4100
+python src/advanced/oco.py ETHUSDT SHORT 0.01 3800 4100
 ```
 
-**Note:** OCO orders are reduce-only and close existing positions.
+**Important Notes:**
+- OCO orders are **reduce-only** (close existing positions)
+- Use **LONG** to close a long position (places SELL orders)
+- Use **SHORT** to close a short position (places BUY orders)
+- Must have an open position before placing OCO orders
 
 ### TWAP Strategy (Time-Weighted Average Price)
 
 Split large orders into smaller chunks over time:
 
 ```powershell
-# Buy 0.1 BTC in 5 slices over 60 seconds
-python src/advanced/twap.py BTCUSDT BUY 0.1 5 60
+# Buy 0.01 BTC in 5 slices over 60 seconds
+python src/advanced/twap.py BTCUSDT BUY 0.01 5 60
 
-# Sell 2 ETH in 10 slices over 120 seconds with randomization
-python src/advanced/twap.py ETHUSDT SELL 2.0 10 120 --randomize
+# Sell 0.1 ETH in 10 slices over 120 seconds with randomization
+python src/advanced/twap.py ETHUSDT SELL 0.1 10 120 --randomize
 
 # Dry run (test without placing real orders)
-python src/advanced/twap.py BTCUSDT BUY 0.05 3 30 --dry-run
+python src/advanced/twap.py BTCUSDT BUY 0.005 3 30 --dry-run
 ```
 
 **Benefits:**
@@ -177,14 +181,14 @@ python src/advanced/twap.py BTCUSDT BUY 0.05 3 30 --dry-run
 Automate buy-low/sell-high within a price range:
 
 ```powershell
-# Setup 10-level grid between $48,000-$52,000
-python src/advanced/grid_strategy.py BTCUSDT 48000 52000 10 0.01
+# Setup 10-level grid between $108,000-$115,000 (current price ~$111,266)
+python src/advanced/grid_strategy.py BTCUSDT 108000 115000 10 0.001
 
-# Setup 20-level grid for ETH
-python src/advanced/grid_strategy.py ETHUSDT 1800 2200 20 0.1
+# Setup 20-level grid for ETH between $3,800-$4,100 (current ~$3,956)
+python src/advanced/grid_strategy.py ETHUSDT 3800 4100 20 0.01
 
 # Test with dry run
-python src/advanced/grid_strategy.py BTCUSDT 48000 52000 5 0.01 --dry-run
+python src/advanced/grid_strategy.py BTCUSDT 108000 115000 5 0.001 --dry-run
 
 # Cancel all grid orders
 python src/advanced/grid_strategy.py BTCUSDT --cancel-all

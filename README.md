@@ -297,9 +297,10 @@ This project is submitted as part of the Binance Futures Order Bot assignment.
 
 ---
 
-**Author**: Pravin Kannan  
+**Author**: Pravin K
+**Email ID**: pravinkannan18@gmail.com
 **GitHub**: [@pravinkannan18](https://github.com/pravinkannan18)  
 **Repository**: [pravin-binance-bot](https://github.com/pravinkannan18/pravin-binance-bot)  
-**Submission Date**: October 2025  
+**Submission Date**: October 24, 2025  
 **Version**: 1.0
 

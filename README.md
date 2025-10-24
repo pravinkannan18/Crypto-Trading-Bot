@@ -303,8 +303,3 @@ This project is submitted as part of the Binance Futures Order Bot assignment.
 **Submission Date**: October 2025  
 **Version**: 1.0
 
----
-
-**Author**: Pravin  
-**Submission Date**: 24/October/2025  
-**Version**: 1.0
